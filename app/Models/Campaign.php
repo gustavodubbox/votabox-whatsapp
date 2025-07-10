@@ -32,10 +32,12 @@ class Campaign extends Model
         'failed_count',
         'rate_limit_per_minute',
         'recurring_config',
+        'votabox_filters',
     ];
 
     protected $casts = [
         'template_parameters' => 'array',
+        'votabox_filters' => 'array',
         'segment_filters' => 'array',
         'recurring_config' => 'array',
         'scheduled_at' => 'datetime',

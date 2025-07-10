@@ -86,8 +86,8 @@
                   </div>
                 </div>
                 <div class="flex items-center space-x-2">
-                  <button @click="toggleAI" :class="['inline-flex items-center px-3 py-1 rounded-full text-sm font-medium', selectedConversation.isAiHandled ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800']"><CpuChipIcon class="h-4 w-4 mr-1" />{{ selectedConversation.isAiHandled ? 'IA Ativa' : 'IA Inativa' }}</button>
-                  <button class="p-2 text-gray-400 hover:text-gray-600"><EllipsisVerticalIcon class="h-5 w-5" /></button>
+                  <!-- <button @click="toggleAI" :class="['inline-flex items-center px-3 py-1 rounded-full text-sm font-medium', selectedConversation.isAiHandled ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800']"><CpuChipIcon class="h-4 w-4 mr-1" />{{ selectedConversation.isAiHandled ? 'IA Ativa' : 'IA Inativa' }}</button>
+                  <button class="p-2 text-gray-400 hover:text-gray-600"><EllipsisVerticalIcon class="h-5 w-5" /></button> -->
                 </div>
               </div>
             </div>
@@ -111,12 +111,12 @@
                      <div v-else class="h-12 flex items-center justify-center bg-gray-200 rounded-lg">
                        <svg class="animate-spin h-5 w-5 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                      </div>
-                     <p v-if="message.content" class="text-sm italic opacity-80 mt-2">"{{ message.content }}"</p>
+                     <!-- <p v-if="message.content" class="text-sm italic opacity-80 mt-2">"{{ message.content }}"</p> -->
                   </div>
                    <a v-else-if="message.type === 'document' && message.media && message.media.url" :href="message.media.url" target="_blank" class="flex items-center space-x-2 p-2 rounded-lg hover:bg-gray-100"><DocumentIcon class="h-6 w-6 text-gray-500"/><span class="text-sm font-medium">{{ message.media.filename || 'Documento' }}</span></a>
                   <div v-else-if="message.type === 'sticker' && message.media && message.media.url"><img :src="message.media.url" alt="Sticker" class="w-32 h-32"/></div>
                   <a v-else-if="message.type === 'location' && message.content" :href="`https://maps.google.com/?q=${message.content}`" target="_blank" class="flex items-center space-x-2 p-2 rounded-lg hover:bg-gray-100"><MapPinIcon class="h-6 w-6 text-blue-500"/><span class="text-sm font-medium underline">Ver localização</span></a>
-                  <div v-else-if="message.type === 'template'"><div v-if="message.media && message.media.url" class="mb-2"><img :src="message.media.url" alt="Mídia do template" class="rounded-lg max-w-full h-auto cursor-pointer" @click="openMedia(message.media.url)" /></div><p class="text-sm" v-html="formatMessage(message.content || '')"></p></div>
+                  <div v-else-if="message.type === 'template'"><div v-if="message.media && message.media.url" class="mb-2"><img :src="message.media.url" alt="Mídia do template" class="rounded-lg max-w-full h-auto cursor-pointer" @click="openMedia(message.media.url)" /></div></div>
                   
                   <p v-else-if="message.content" class="text-sm" v-html="formatMessage(message.content)"></p>
                   

@@ -13,8 +13,8 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call([
-            // RolePermissionSeeder::class,
-            WhatsAppAccountSeeder::class,
+            RolePermissionSeeder::class,
+            // WhatsAppAccountSeeder::class,
         ]);
     }
 }

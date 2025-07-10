@@ -43,15 +43,17 @@ class SendCampaignMessage implements ShouldQueue
      */
     public function handle(CampaignService $campaignService): void
     {
+        $isResendAttempt = $this->campaignContact->status === 'failed';
+        
         // Check if campaign is still running
-        if (!$this->campaign->isRunning()) {
-            Log::info('Campaign message job skipped - campaign not running', [
-                'campaign_id' => $this->campaign->id,
-                'campaign_contact_id' => $this->campaignContact->id,
-                'campaign_status' => $this->campaign->status
-            ]);
-            return;
-        }
+        // if (!$this->campaign->isRunning()) {
+        //     Log::info('Campaign message job skipped - campaign not running', [
+        //         'campaign_id' => $this->campaign->id,
+        //         'campaign_contact_id' => $this->campaignContact->id,
+        //         'campaign_status' => $this->campaign->status
+        //     ]);
+        //     return;
+        // }
 
         // Check if contact is still pending
         if ($this->campaignContact->status !== 'pending') {

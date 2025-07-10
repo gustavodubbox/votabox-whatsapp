@@ -11,6 +11,7 @@ use App\Http\Controllers\AiTrainingController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ContactController;
+use App\Http\Controllers\WebAuthController; 
 /*
 |--------------------------------------------------------------------------
 | Web Routes
@@ -61,9 +62,9 @@ Route::middleware(['auth'])->group(function () {
 // --- ROTAS DE AUTENTICAÇÃO PÚBLICAS ---
 
 // Rota para EXIBIR a página de login
-Route::get('/login', function () {
-    return Inertia::render('Auth/Login');
-})->name('login')->middleware('guest');
+Route::get('/login', [WebAuthController::class, 'showLoginPage']) // <-- ALTERADO
+    ->middleware(['autologin', 'guest'])
+    ->name('login');
 
 // Rota para PROCESSAR a submissão do formulário de login
 Route::post('/login', function (Request $request) {

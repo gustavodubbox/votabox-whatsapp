@@ -21,9 +21,9 @@ class EventServiceProvider extends ServiceProvider
         Registered::class => [
             SendEmailVerificationNotification::class,
         ],
-        WhatsAppMessageReceived::class => [
-            ProcessMessageWithAI::class,
-        ],
+        // WhatsAppMessageReceived::class => [
+        //     ProcessMessageWithAI::class,
+        // ],
     ];
 
     /**

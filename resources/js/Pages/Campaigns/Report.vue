@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue';
-import { Link } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3'; // Import 'router' for reload
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { Chart as ChartJS, Title, Tooltip, Legend, ArcElement, BarElement, CategoryScale, LinearScale, PointElement, LineElement } from 'chart.js';
 import { Doughnut, Bar } from 'vue-chartjs';
@@ -11,6 +11,7 @@ import {
   EyeIcon,
   ExclamationTriangleIcon,
   UserGroupIcon,
+  ArrowPathIcon, // Importa o ícone de reenvio
 } from '@heroicons/vue/24/outline';
 
 ChartJS.register(Title, Tooltip, Legend, ArcElement, BarElement, CategoryScale, LinearScale, PointElement, LineElement);
@@ -22,6 +23,7 @@ const props = defineProps({
 const reportData = ref(null);
 const campaignContacts = ref({ data: [], links: [] });
 const isLoading = ref(true);
+const resendingId = ref(null); // Ref para controlar o estado do botão de reenvio
 
 const doughnutChartData = ref({ labels: [], datasets: [] });
 const timelineChartData = ref({ labels: [], datasets: [] });
@@ -31,7 +33,6 @@ const chartOptions = {
   maintainAspectRatio: false,
 };
 
-// Função para buscar dados do relatório, incluindo a página de contatos
 const fetchReportData = async (url = route('api.campaigns.report', props.campaign.id)) => {
   isLoading.value = true;
   try {
@@ -72,6 +73,33 @@ const getStatusText = (status) => ({
   'failed': 'Falhou',
   'pending': 'Pendente'
 }[status] || 'Desconhecido');
+
+/**
+ * NOVO: Função para reenviar uma mensagem que falhou.
+ */
+const resendMessage = async (campaignContactId) => {
+  if (resendingId.value) return; // Previne cliques duplos
+
+  if (!confirm('Tem certeza que deseja reenviar esta mensagem?')) return;
+  
+  resendingId.value = campaignContactId;
+
+  try {
+    await axios.post(route('api.campaigns.contacts.resend', campaignContactId));
+    
+    // Atualiza a lista de contatos para refletir a mudança de status
+    // Pega a URL da página atual para não voltar para a primeira página
+    const currentPageUrl = campaignContacts.value.path;
+    await fetchReportData(currentPageUrl);
+
+  } catch (error) {
+    console.error("Erro ao reenviar mensagem:", error);
+    alert("Não foi possível reenviar a mensagem. Tente novamente.");
+  } finally {
+    resendingId.value = null; // Libera o botão
+  }
+};
+
 
 onMounted(() => {
   fetchReportData();
@@ -124,11 +152,12 @@ onMounted(() => {
                   <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Telefone</th>
                   <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                   <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lido em</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
                 </tr>
               </thead>
               <tbody class="bg-white divide-y divide-gray-200">
                 <tr v-if="campaignContacts.data.length === 0">
-                    <td colspan="4" class="text-center py-10 text-gray-500">Nenhum contato para exibir.</td>
+                    <td colspan="5" class="text-center py-10 text-gray-500">Nenhum contato para exibir.</td>
                 </tr>
                 <tr v-for="item in campaignContacts.data" :key="item.id">
                   <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-800">{{ item.contact.name }}</td>
@@ -140,6 +169,17 @@ onMounted(() => {
                   </td>
                   <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {{ item.read_at ? new Date(item.read_at).toLocaleString('pt-BR') : '---' }}
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-center">
+                    <button
+                      v-if="item.status === 'failed'"
+                      @click="resendMessage(item.id)"
+                      :disabled="resendingId === item.id"
+                      class="text-blue-600 hover:text-blue-800 disabled:text-gray-400 p-1 rounded-full hover:bg-blue-100 transition-colors"
+                      title="Reenviar Mensagem"
+                    >
+                      <ArrowPathIcon class="h-5 w-5" :class="{'animate-spin': resendingId === item.id}" />
+                    </button>
                   </td>
                 </tr>
               </tbody>

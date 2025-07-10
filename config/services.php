@@ -48,5 +48,7 @@ return [
         'webhook_verify_token' => env('WHATSAPP_WEBHOOK_VERIFY_TOKEN'),
         'app_secret' => env('WHATSAPP_APP_SECRET'),
     ],
-
+    'votabox' => [
+        'base_url' => env('VOTABOX_API_URL', 'https://dev.votabox.com.br/api/v1'),
+    ],
 ];

@@ -13,14 +13,17 @@ use App\Jobs\SendCampaignMessage;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Exception;
+use App\Services\VotaBoxService; // <-- 1. Importar o novo serviço
 
 class CampaignService
 {
     protected WhatsAppBusinessService $whatsappService;
+    protected VotaBoxService $votaBoxService; // <-- 2. Adicionar propriedade
 
-    public function __construct(WhatsAppBusinessService $whatsappService)
+    public function __construct(WhatsAppBusinessService $whatsappService, VotaBoxService $votaBoxService) // <-- 3. Injetar no construtor
     {
         $this->whatsappService = $whatsappService;
+        $this->votaBoxService = $votaBoxService; // <-- 4. Atribuir
     }
 
     /**
@@ -31,11 +34,25 @@ class CampaignService
         DB::beginTransaction();
 
         try {
+            // Remove os filtros votabox dos dados principais da campanha para não salvar no DB
+            $votaboxFilters = $data['votabox_filters'] ?? null;
+            
+            // --- INÍCIO DA CORREÇÃO ---
+            // Garante que os campos que são arrays sejam convertidos para JSON string
+            // antes de serem passados para o método de criação.
+            // if (isset($data['template_parameters']) && is_array($data['template_parameters'])) {
+            //     $data['template_parameters'] = json_encode($data['template_parameters']);
+            // }
+            // if (isset($data['votabox_filters']) && is_array($data['votabox_filters'])) {
+            //     $data['votabox_filters'] = json_encode($data['votabox_filters']);
+            // }
+            // --- FIM DA CORREÇÃO ---
+
             $campaign = Campaign::create($data);
 
-            // Apply segment filters and add contacts
-            if (isset($data['segment_filters'])) {
-                $this->applyCampaignSegments($campaign, $data['segment_filters']);
+            // Se filtros da VotaBox foram fornecidos, busca e popula os contatos
+            if ($votaboxFilters) {
+                $this->populateContactsFromVotaBox($campaign, $votaboxFilters);
             }
 
             DB::commit();
@@ -52,6 +69,165 @@ class CampaignService
             Log::error('Failed to create campaign: ' . $e->getMessage());
             throw $e;
         }
+    }
+
+    /**
+     * ATUALIZADO: Lógica de atualização completa.
+     */
+    public function updateCampaign(Campaign $campaign, array $data): Campaign
+    {
+        DB::beginTransaction();
+        try {
+            $votaboxFilters = $data['votabox_filters'] ?? null;
+
+            // Garante a conversão para JSON antes de salvar os dados principais
+            if (isset($data['votabox_filters']) && is_array($data['votabox_filters'])) {
+                $data['votabox_filters'] = json_encode($data['votabox_filters']);
+            }
+
+            // if (isset($data['template_parameters']) && is_array($data['template_parameters'])) {
+            //     $data['template_parameters'] = json_encode($data['template_parameters']);
+            // }
+
+            Log::info('[UpdateCampaign] Atualizando campanha.', [
+                'campaign_id' => $campaign->id,
+                'data' => $data
+            ]);
+
+            $campaign->update($data);
+
+            // Se novos filtros foram enviados, ressincroniza os contatos
+            if ($votaboxFilters) {
+                Log::info('[UpdateCampaign] Novos filtros recebidos. Sincronizando contatos.', ['campaign_id' => $campaign->id]);
+                
+                // 1. Apaga os contatos antigos da campanha
+                CampaignContact::where('campaign_id', $campaign->id)->delete();
+                Log::info('[UpdateCampaign] Contatos antigos foram apagados.', ['campaign_id' => $campaign->id]);
+
+                // 2. Popula com os novos contatos
+                $this->populateContactsFromVotaBox($campaign, $votaboxFilters);
+            }
+
+            DB::commit();
+            return $campaign->fresh();
+
+        } catch (Exception $e) {
+            DB::rollBack();
+            Log::error('Failed to update campaign: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            throw $e;
+        }
+    }
+
+    public function populateContactsFromVotaBox(Campaign $campaign, array $votaboxFilters): void
+    {
+        Log::info('[CampaignService] Buscando contatos na VotaBox...', ['filters' => $votaboxFilters]);
+        $votaboxPeople = $this->votaBoxService->searchPeople($votaboxFilters);
+
+        if (isset($votaboxPeople['success']) && $votaboxPeople['success'] === false) {
+            throw new Exception('Falha ao buscar contatos na VotaBox: ' . ($votaboxPeople['message'] ?? 'Erro desconhecido.'));
+        }
+
+        if (empty($votaboxPeople)) {
+            Log::warning('[CampaignService] A busca na VotaBox não retornou contatos.', ['campaign_id' => $campaign->id]);
+            $campaign->update(['total_contacts' => 0]);
+            return;
+        }
+
+        $surveyAnswerTags = [];
+        if (!empty($votaboxFilters['surveys'])) {
+            foreach ($votaboxFilters['surveys'] as $survey) {
+                if (!empty($survey['questions'])) {
+                    // Pega o valor da chave 'answer' de cada questão.
+                    $answers = array_column($survey['questions'], 'answer');
+                    $surveyAnswerTags = array_merge($surveyAnswerTags, $answers);
+                }
+            }
+        }
+
+        $contactCount = 0;
+        foreach ($votaboxPeople as $index => $person) {
+            // --- INÍCIO DA CORREÇÃO ---
+            // Ajustado para o novo formato do array de telefones
+            if (empty($person['phones']) || empty($person['phones'][0])) {
+                Log::warning('[CampaignService] Pessoa ignorada por não ter telefone.', ['person_index' => $index, 'person_name' => $person['fullname'] ?? 'N/A']);
+                continue;
+            }
+            // --- FIM DA CORREÇÃO ---
+
+            try {
+                // Ajustado para pegar o telefone diretamente do array de strings
+                $phoneNumber = $this->formatPhoneNumber($person['phones'][0]);
+
+                $existingTags = array_map(fn($tag) => $tag['label'], $person['tags'] ?? []);
+                $surveyTags = $this->extractSurveyAnswersAsTags($person, $votaboxFilters['surveys'] ?? []);
+                $existingTags = array_map(fn($tag) => $tag['label'], $person['tags'] ?? []);
+                $allTags = array_unique(array_merge($existingTags, $surveyAnswerTags));
+                
+
+                $contact = WhatsAppContact::updateOrCreate(
+                    ['phone_number' => $phoneNumber],
+                    [
+                        // Ajustado para usar 'fullname' e o novo 'id'
+                        'name' => $person['fullname'] ?? $phoneNumber,
+                        'custom_fields' => ['votabox_id' => $person['id'] ?? null],
+                        'tags' => $allTags
+                    ]
+                );
+
+                CampaignContact::create([
+                    'campaign_id' => $campaign->id,
+                    'contact_id' => $contact->id,
+                    'status' => 'pending',
+                ]);
+
+                $contactCount++;
+
+            } catch(Exception $e) {
+                Log::error('[CampaignService] Falha ao processar um único contato da VotaBox.', [
+                    'person_data' => $person,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+
+        $campaign->update(['total_contacts' => $contactCount]);
+        Log::info("[CampaignService] Processamento finalizado. {$contactCount} contatos associados à campanha.", ['campaign_id' => $campaign->id]);
+    }
+
+    /**
+     * NOVA FUNÇÃO: Formata um número de telefone para o padrão E.164 (com 55 no início).
+     */
+    private function formatPhoneNumber(string $number): string
+    {
+        // Remove todos os caracteres não numéricos
+        $number = preg_replace('/\D/', '', $number);
+
+        // Se o número já começa com 55 e tem 12 ou 13 dígitos (55 + DDD + 8 ou 9 dígitos), está correto.
+        if (preg_match('/^55\d{10,11}$/', $number)) {
+            return $number;
+        }
+        
+        // Se o número tem 10 ou 11 dígitos (DDD + número), adiciona o 55
+        if (preg_match('/^\d{10,11}$/', $number)) {
+            return '55' . $number;
+        }
+
+        // Retorna o número limpo como fallback, mas loga um aviso
+        Log::warning('[PhoneFormat] Número de telefone com formato inesperado.', ['number' => $number]);
+        return $number;
+    }
+
+    /**
+     * NOVA FUNÇÃO: Extrai as respostas da pesquisa de uma pessoa e as formata como tags.
+     */
+    private function extractSurveyAnswersAsTags(array $person, array $surveysFilter): array
+    {
+        // Esta função é um placeholder. A API da VotaBox não retorna as respostas
+        // de uma pessoa na rota /people/search. Se você precisar disso,
+        // precisaria de um endpoint adicional na VotaBox que retorne as respostas
+        // de uma pessoa para uma dada pesquisa.
+        // Por enquanto, esta função retornará um array vazio.
+        return [];
     }
 
     /**
@@ -194,34 +370,34 @@ class CampaignService
             $this->whatsappService->setAccount($campaign->whatsappAccount);
 
             // ---> INÍCIO DA CORREÇÃO <---
-            // Passo 1: Buscar os detalhes do template para obter o idioma correto.
+            // Passo 1: Decodificar os parâmetros do template, que vêm como string do DB.
+            $templateParams = $campaign->template_parameters;
+            if (is_string($templateParams)) {
+                $templateParams = json_decode($templateParams, true) ?: [];
+            }
+            
+            // Passo 2: Buscar os detalhes do template para obter o idioma correto.
             $templateData = $this->whatsappService->getTemplateByName($campaign->template_name);
-
             if (!$templateData) {
                 throw new Exception("Template '{$campaign->template_name}' not found on Meta Business account.");
             }
-            
-            // Extrai o código do idioma do template encontrado.
             $languageCode = $templateData['language'];
+
+            // Passo 3: Personalizar os parâmetros já como um array.
+            $personalizedComponents = $this->personalizeParameters($templateParams, $contact);
             // ---> FIM DA CORREÇÃO <---
 
-            $personalizedParams = $this->personalizeParameters($campaign->template_parameters, $contact);
-
-            // Passo 2: Enviar a mensagem usando o idioma dinâmico.
-            // A assinatura de sendTemplateMessage deve ser (to, template_name, language_code, params)
             $result = $this->whatsappService->sendTemplateMessage(
                 $contact->phone_number,
                 $campaign->template_name,
-                $languageCode, // 3º argumento agora é a string do idioma
-                $personalizedParams // 4º argumento agora é o array de parâmetros
+                $languageCode,
+                $personalizedComponents // Envia a estrutura de componentes correta
             );
             
-            // ... resto do método (lógica de sucesso e falha) continua igual ...
             if ($result['success']) {
                 $messageId = $result['data']['messages'][0]['id'] ?? null;
                 $campaignContact->update(['status' => 'sent', 'message_id' => $messageId, 'sent_at' => now()]);
-                // ... lógica para salvar no histórico, etc.
-                $this->addMessageToConversationHistory($campaign, $contact, $messageId, $personalizedParams);
+                $this->addMessageToConversationHistory($campaign, $contact, $messageId, $templateParams);
             } else {
                 $errorMessage = $result['message'] ?? 'Failed to send message.';
                 if (isset($result['data']['error']['message'])) {
@@ -240,8 +416,6 @@ class CampaignService
                 'campaign_contact_id' => $campaignContact->id,
                 'error' => $e->getMessage()
             ]);
-            // Não relance a exceção para que o job não tente novamente em caso de erro definitivo
-            // e pare a campanha.
             return ['success' => false, 'message' => $e->getMessage()];
         }
     }
@@ -250,50 +424,21 @@ class CampaignService
      * Adiciona uma cópia da mensagem da campanha no histórico da conversa individual.
      * Esta é a correção para o erro de 'message_id' sem valor padrão.
      */
-    private function addMessageToConversationHistory(Campaign $campaign, WhatsAppContact $contact, ?string $apiMessageId, array $personalizedParams): void
+    private function addMessageToConversationHistory(Campaign $campaign, WhatsAppContact $contact, ?string $apiMessageId, array $templateParams): void
     {
         try {
-            // Garante que a conversa com o contato exista, ou a cria se for a primeira vez.
             $conversation = WhatsAppConversation::firstOrCreate(
-                [
-                    'contact_id' => $contact->id,
-                    'whatsapp_account_id' => $campaign->whatsapp_account_id
-                ],
-                [
-                    'conversation_id' => \Illuminate\Support\Str::uuid(),
-                    'assigned_user_id' => $campaign->user_id
-                ]
+                ['contact_id' => $contact->id, 'whatsapp_account_id' => $campaign->whatsapp_account_id],
+                ['conversation_id' => \Illuminate\Support\Str::uuid(), 'assigned_user_id' => $campaign->user_id]
             );
 
-            // Obtém o corpo da mensagem com as variáveis substituídas para salvar.
-            $formattedBody = $this->getFormattedMessageBody($campaign, $personalizedParams);
-
             // ---> INÍCIO DA CORREÇÃO <---
-            $mediaData = null;
-            $mediaUrl = null;
-
-            // Verifica se o componente de cabeçalho (header) existe e tem parâmetros.
-            if (isset($personalizedParams['header'][0])) {
-                $headerParam = $personalizedParams['header'][0];
-                
-                // Procura pela URL da mídia nos tipos suportados.
-                if (isset($headerParam['image']['link'])) {
-                    $mediaUrl = $headerParam['image']['link'];
-                } elseif (isset($headerParam['video']['link'])) {
-                    $mediaUrl = $headerParam['video']['link'];
-                } elseif (isset($headerParam['document']['link'])) {
-                    $mediaUrl = $headerParam['document']['link'];
-                }
-            }
-
-            // Se uma URL de mídia foi encontrada, cria o objeto de mídia.
-            if ($mediaUrl) {
-                $mediaData = [
-                    'url' => $mediaUrl,
-                    'caption' => $formattedBody
-                ];
-            }
+            // Passa o objeto $contact para que a personalização possa ser feita
+            $formattedBody = $this->getFormattedMessageBody($campaign, $templateParams, $contact);
             // ---> FIM DA CORREÇÃO <---
+
+            $mediaUrl = $templateParams['header']['url'] ?? null;
+            $mediaData = $mediaUrl ? ['url' => $mediaUrl] : null;
 
             $conversation->messages()->create([
                 'message_id' => \Illuminate\Support\Str::uuid(),
@@ -304,22 +449,19 @@ class CampaignService
                 'direction' => 'outbound',
                 'type' => 'template',
                 'content' => $formattedBody,
-                'media' => $mediaData, // Salva o objeto de mídia corretamente.
+                'media' => $mediaData,
                 'status' => 'sent',
                 'sent_at' => now(),
                 'is_ai_generated' => false,
             ]);
 
-            // Atualiza o timestamp da última mensagem na conversa.
             $conversation->touch('last_message_at');
 
         } catch (\Exception $e) {
-            // Registra um erro detalhado se não for possível salvar a mensagem no histórico.
-            Log::error('CampaignService: Failed to add campaign message to conversation history.', [
+            Log::error('CampaignService: Failed to add message to history.', [
+                'error' => $e->getMessage(),
                 'campaign_id' => $campaign->id,
                 'contact_id' => $contact->id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
             ]);
         }
     }
@@ -506,36 +648,70 @@ class CampaignService
         return $analytics;
     }
 
-    private function getFormattedMessageBody(Campaign $campaign, array $personalizedParams): ?string
+    private function getFormattedMessageBody(Campaign $campaign, array $templateParams, WhatsAppContact $contact): ?string
     {
         try {
             $this->whatsappService->setAccount($campaign->whatsappAccount);
-            $templatesResponse = $this->whatsappService->getTemplates();
-            if (!$templatesResponse['success']) return null;
+            $templateData = $this->whatsappService->getTemplateByName($campaign->template_name);
+            
+            if (!$templateData) return null;
 
             $templateBody = null;
-            foreach ($templatesResponse['data'] as $template) {
-                if ($template['name'] === $campaign->template_name) {
-                    foreach ($template['components'] as $component) {
-                        if ($component['type'] === 'BODY') {
-                            $templateBody = $component['text'];
-                            break 2;
-                        }
-                    }
+            foreach ($templateData['components'] as $component) {
+                if ($component['type'] === 'BODY') {
+                    $templateBody = $component['text'];
+                    break;
                 }
             }
+
             if (!$templateBody) return null;
             
-            foreach ($personalizedParams['body'] as $index => $param) {
-                $placeholder = '{{' . ($index + 1) . '}}';
-                $templateBody = str_replace($placeholder, $param['text'], $templateBody);
+            // --- INÍCIO DA CORREÇÃO FINAL ---
+            // Isola apenas os parâmetros do corpo da mensagem
+            $bodyParams = $templateParams;
+            if (isset($bodyParams['header'])) {
+                unset($bodyParams['header']);
             }
+
+            if (!empty($bodyParams)) {
+                // Ordena pela chave (1, 2, 3...) para garantir a ordem correta
+                ksort($bodyParams);
+
+                foreach ($bodyParams as $placeholderNumber => $field) {
+                    // Pula qualquer valor nulo que possa ter sido salvo
+                    if ($field === null) continue;
+
+                    // Constrói o placeholder correto, ex: {{1}}
+                    $placeholder = '{{' . $placeholderNumber . '}}';
+                    
+                    // Obtém o valor real do contato
+                    $replacement = '';
+                    if ($field === 'name') {
+                        $replacement = $contact->name ?? '';
+                    } elseif ($field === 'phone_number') {
+                        $replacement = $contact->phone_number;
+                    } elseif (is_string($field) && str_starts_with($field, 'custom.')) {
+                        $customKey = substr($field, 7);
+                        $replacement = $contact->custom_fields[$customKey] ?? '';
+                    } else {
+                        $replacement = $field; // Permite valores literais
+                    }
+
+                    // Realiza a substituição
+                    $templateBody = str_replace($placeholder, (string)$replacement, $templateBody);
+                }
+            }
+            // --- FIM DA CORREÇÃO FINAL ---
+
             return $templateBody;
+
         } catch (\Exception $e) {
-            Log::error('Could not format message body for logging.', ['error' => $e->getMessage()]);
+            Log::error('Could not format message body for logging.', [
+                'error' => $e->getMessage(),
+                'campaign_id' => $campaign->id
+            ]);
             return null;
         }
     }
-    
 }
 

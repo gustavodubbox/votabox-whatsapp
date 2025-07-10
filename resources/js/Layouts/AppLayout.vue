@@ -5,13 +5,6 @@
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex justify-between h-16">
           <div class="flex">
-            <!-- Logo -->
-            <div class="flex-shrink-0 flex items-center">
-              <Link href="/dashboard" class="text-xl font-bold text-green-600">
-                sim.social
-              </Link>
-            </div>
-            
             <!-- Navigation Links -->
             <div class="hidden sm:ml-6 sm:flex sm:space-x-8">
               <Link 
@@ -69,60 +62,7 @@
                 <MegaphoneIcon class="w-4 h-4 mr-2" />
                 Campanhas
               </Link>
-              
-              <Link 
-                :href="route('ai.training')" 
-                :class="[
-                  'inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium',
-                  route().current('ai*') 
-                    ? 'border-green-500 text-gray-900' 
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                ]"
-              >
-                <CpuChipIcon class="w-4 h-4 mr-2" />
-                IA
-              </Link>
-            </div>
-          </div>
-          
-          <!-- User Menu -->
-          <div class="hidden sm:ml-6 sm:flex sm:items-center">
-            <button class="bg-white p-1 rounded-full text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
-              <BellIcon class="h-6 w-6" />
-            </button>
-            
-            <div class="ml-3 relative">
-              <Menu as="div" class="relative">
-                <MenuButton class="bg-white flex text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
-                  <img class="h-8 w-8 rounded-full" :src="$page.props.auth.user.avatar || 'https://i.pravatar.cc/32'" :alt="$page.props.auth.user.name" />
-                </MenuButton>
-                <transition
-                  enter-active-class="transition ease-out duration-200"
-                  enter-from-class="transform opacity-0 scale-95"
-                  enter-to-class="transform opacity-100 scale-100"
-                  leave-active-class="transition ease-in duration-75"
-                  leave-from-class="transform opacity-100 scale-100"
-                  leave-to-class="transform opacity-0 scale-95"
-                >
-                  <MenuItems class="origin-top-right absolute right-0 mt-2 w-48 rounded-md shadow-lg py-1 bg-white ring-1 ring-black ring-opacity-5 focus:outline-none">
-                    <MenuItem v-slot="{ active }">
-                      <Link :href="route('profile')" :class="[active ? 'bg-gray-100' : '', 'block px-4 py-2 text-sm text-gray-700']">
-                        Perfil
-                      </Link>
-                    </MenuItem>
-                    <MenuItem v-slot="{ active }">
-                      <Link :href="route('settings')" :class="[active ? 'bg-gray-100' : '', 'block px-4 py-2 text-sm text-gray-700']">
-                        Configurações
-                      </Link>
-                    </MenuItem>
-                    <MenuItem v-slot="{ active }">
-                      <Link :href="route('logout')" method="post" as="button" class="w-full text-left" :class="[active ? 'bg-gray-100' : '', 'block px-4 py-2 text-sm text-gray-700']">
-                        Sair
-                      </Link>
-                    </MenuItem>
-                  </MenuItems>
-                </transition>
-              </Menu>
+
             </div>
           </div>
           

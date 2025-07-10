@@ -143,7 +143,7 @@ class ProcessWebhook implements ShouldQueue
             if ($latestConversation->status === 'closed') {
                 $latestConversation->update([
                     'status' => 'open',
-                    'is_ai_handled' => true, // Devolve para a IA
+                    'is_ai_handled' => false, // Devolve para a IA
                     'chatbot_state' => null, // Limpa o estado do chatbot
                     'assigned_user_id' => null, // Remove o agente atribuído
                 ]);
@@ -161,7 +161,7 @@ class ProcessWebhook implements ShouldQueue
             'whatsapp_account_id' => $account->id,
             'contact_id' => $contact->id,
             'status' => 'open',
-            'is_ai_handled' => true,
+            'is_ai_handled' => false,
             'chatbot_state' => null,
         ]);
         

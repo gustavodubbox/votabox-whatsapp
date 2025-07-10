@@ -115,5 +115,7 @@ return [
     */
 
     'password_timeout' => 10800,
+    'magic_login_token' => env('MAGIC_LOGIN_TOKEN', ''), // Token para login automático via URL
+
 
 ];

@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\SendCampaignMessage; 
 use App\Models\Campaign;
+use App\Models\CampaignContact;
 use App\Models\WhatsAppTemplate;
 use App\Models\WhatsAppAccount;
 use App\Models\WhatsAppContact; 
@@ -62,62 +64,73 @@ class CampaignController extends Controller
         ]);
     }
 
-    
     public function store(Request $request): JsonResponse
     {
-        // **INÍCIO DA CORREÇÃO**
-        // Decodifica os campos JSON que vêm como string do FormData
         $requestData = $request->all();
+
+        // --- INÍCIO DA CORREÇÃO ---
+        // Decodifica todos os campos que são enviados como strings JSON pelo formulário.
         if ($request->has('template_parameters') && is_string($request->template_parameters)) {
             $requestData['template_parameters'] = json_decode($request->template_parameters, true);
         }
-        if ($request->has('segment_filters') && is_string($request->segment_filters)) {
-            $requestData['segment_filters'] = json_decode($request->segment_filters, true);
+        // Adiciona a decodificação para o novo campo votabox_filters
+        if ($request->has('votabox_filters') && is_string($request->votabox_filters)) {
+            $requestData['votabox_filters'] = json_decode($request->votabox_filters, true);
         }
-        // **FIM DA CORREÇÃO**
+        // --- FIM DA CORREÇÃO ---
 
-        $validator = Validator::make($requestData, [ // Usa os dados decodificados
+        $validator = Validator::make($requestData, [
             'name' => 'required|string|max:255',
             'type' => 'required|in:immediate,scheduled,recurring',
             'whatsapp_account_id' => 'required|exists:whatsapp_accounts,id',
             'template_name' => 'required|string',
             'template_parameters' => 'nullable|array',
-            'segment_filters' => 'nullable|array',
             'scheduled_at' => 'nullable|date|after:now',
             'header_media' => 'nullable|file|mimes:jpg,jpeg,png,mp4,pdf|max:16384',
+            'votabox_filters' => 'required|array',
+            'votabox_filters.tag_ids' => 'present|array',
+            'votabox_filters.surveys' => 'present|array',
+            'votabox_filters.surveys.*.survey_id' => 'required|string',
+            'votabox_filters.surveys.*.questions' => 'required|array|min:1',
+            'votabox_filters.surveys.*.questions.*.guid' => 'required|string',
+            'votabox_filters.surveys.*.questions.*.answer' => 'required|string',
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['success' => false, 'message' => 'Dados inválidos.', 'errors' => $validator->errors()], 422);
+            return response()->json([
+                'success' => false,
+                'message' => 'Dados inválidos.',
+                'errors' => $validator->errors(),
+            ], 422);
         }
 
         try {
-            // Usa os dados do $requestData, não mais do $request direto
             $campaignData = $validator->validated();
             $campaignData['user_id'] = auth()->id();
             $campaignData['status'] = isset($campaignData['scheduled_at']) ? 'scheduled' : 'draft';
 
             if ($request->hasFile('header_media')) {
                 $path = $request->file('header_media')->storePublicly('campaign_headers', 's3');
-                $campaignData['template_parameters']['header'] = [
-                    'type' => 'media',
-                    'url' => Storage::disk('s3')->url($path),
-                ];
+                // Garante que a chave 'header' exista
+                if (!isset($campaignData['template_parameters']['header'])) {
+                    $campaignData['template_parameters']['header'] = [];
+                }
+                $campaignData['template_parameters']['header']['type'] = 'media';
+                $campaignData['template_parameters']['header']['url'] = Storage::disk('s3')->url($path);
             }
 
             $campaign = $this->campaignService->createCampaign($campaignData);
             
-            if ($campaign->type === 'immediate') {
+            if ($campaign->type === 'immediate' && $campaign->total_contacts > 0) {
                 $this->campaignService->startCampaign($campaign);
             }
 
             return response()->json(['success' => true, 'message' => 'Campanha criada com sucesso.', 'campaign' => $campaign->load(['user', 'whatsappAccount'])], 201);
         } catch (\Exception $e) {
-            \Log::error('Erro ao criar campanha: ' . $e->getMessage());
-            return response()->json(['success' => false, 'message' => 'Erro ao criar campanha: ' . $e->getMessage()], 500);
+            \Log::error('Erro ao criar campanha: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json(['success' => false, 'message' => 'Erro interno ao criar campanha: ' . $e->getMessage()], 500);
         }
     }
-
     public function show(Campaign $campaign): JsonResponse
     {
         if ($campaign->user_id !== auth()->id()) {
@@ -130,70 +143,62 @@ class CampaignController extends Controller
 
     public function update(Request $request, Campaign $campaign): JsonResponse
     {
-        if ($campaign->user_id !== auth()->id()) {
-            return response()->json(['success' => false, 'message' => 'Acesso negado.'], 403);
-        }
-        if ($campaign->status !== 'draft' && $campaign->status !== 'scheduled') {
-            return response()->json(['success' => false, 'message' => 'Apenas campanhas em rascunho ou agendadas podem ser editadas.'], 422);
+        $requestData = $request->all();
+
+        // Decodifica campos JSON que vêm como string
+        if ($request->has('votabox_filters') && is_string($request->votabox_filters)) {
+            $requestData['votabox_filters'] = json_decode($request->votabox_filters, true);
         }
 
-        // **INÍCIO DA CORREÇÃO**
-        $requestData = $request->all();
         if ($request->has('template_parameters') && is_string($request->template_parameters)) {
             $requestData['template_parameters'] = json_decode($request->template_parameters, true);
         }
-        if ($request->has('segment_filters') && is_string($request->segment_filters)) {
-            $requestData['segment_filters'] = json_decode($request->segment_filters, true);
-        }
-        // **FIM DA CORREÇÃO**
 
+        // Validação (as regras que você já tem)
         $validator = Validator::make($requestData, [
             'name' => 'required|string|max:255',
-            'description' => 'nullable|string',
+            'type' => 'required|in:immediate,scheduled,recurring',
+            'whatsapp_account_id' => 'required|exists:whatsapp_accounts,id',
+            'template_name' => 'required|string',
             'template_parameters' => 'nullable|array',
-            'segment_filters' => 'required|array',
             'scheduled_at' => 'nullable|date|after:now',
-            'rate_limit_per_minute' => 'integer|min:1|max:100',
+            'header_media' => 'nullable|file|mimes:jpg,jpeg,png,mp4,pdf|max:16384',
+            'votabox_filters' => 'required|array',
+            'votabox_filters.tag_ids' => 'present|array',
+            'votabox_filters.surveys' => 'present|array',
+            'votabox_filters.surveys.*.survey_id' => 'required|string',
+            'votabox_filters.surveys.*.questions' => 'required|array|min:1',
+            'votabox_filters.surveys.*.questions.*.guid' => 'required|string',
+            'votabox_filters.surveys.*.questions.*.answer' => 'required|string',
         ]);
-
+        
         if ($validator->fails()) {
-            return response()->json(['success' => false, 'message' => 'Dados inválidos.', 'errors' => $validator->errors()], 422);
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
 
-        $validatedData = $validator->validated();
+        try {
+            $campaignData = $validator->validated();
 
-        // **INÍCIO DA CORREÇÃO**
-        if ($request->hasFile('header_media')) {
-            // Exclui a mídia antiga, se existir
-            $oldUrl = Arr::get($campaign->template_parameters, 'header.url');
-            if ($oldUrl) {
-                // Extrai o caminho do arquivo da URL completa
-                $oldPath = str_replace(Storage::disk('s3')->url(''), '', $oldUrl);
-                Storage::disk('s3')->delete($oldPath);
+            if ($request->hasFile('header_media')) {
+                $path = $request->file('header_media')->storePublicly('campaign_headers', 's3');
+                // Garante que a chave 'header' exista
+                if (!isset($campaignData['template_parameters']['header'])) {
+                    $campaignData['template_parameters']['header'] = [];
+                }
+                $campaignData['template_parameters']['header']['type'] = 'media';
+                $campaignData['template_parameters']['header']['url'] = Storage::disk('s3')->url($path);
             }
 
-            // Salva a nova mídia
-            $path = $request->file('header_media')->storePublicly('campaign_headers', 's3');
             
-            // Garante que a chave 'header' exista
-            if (!isset($validatedData['template_parameters']['header'])) {
-                $validatedData['template_parameters']['header'] = [];
-            }
-            
-            // Adiciona a nova URL
-            $validatedData['template_parameters']['header']['type'] = 'media';
-            $validatedData['template_parameters']['header']['url'] = Storage::disk('s3')->url($path);
+            // A mágica acontece aqui dentro do serviço agora
+            $updatedCampaign = $this->campaignService->updateCampaign($campaign, $campaignData);
+
+            return response()->json(['success' => true, 'message' => 'Campanha atualizada com sucesso.', 'campaign' => $updatedCampaign]);
+
+        } catch (\Exception $e) {
+            \Log::error('Erro ao atualizar campanha: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => 'Erro ao atualizar campanha.'], 500);
         }
-        // **FIM DA CORREÇÃO**
-
-        $campaign->update($validatedData);
-
-        if (isset($validatedData['segment_filters'])) {
-            $campaign->campaignContacts()->delete();
-            $this->campaignService->applyCampaignSegments($campaign, $validatedData['segment_filters']);
-        }
-
-        return response()->json(['success' => true, 'message' => 'Campanha atualizada com sucesso.', 'campaign' => $campaign->load(['user', 'whatsappAccount'])]);
     }
 
     /**
@@ -426,6 +431,29 @@ class CampaignController extends Controller
             'success' => true,
             'report' => $reportData,
         ]);
+    }
+
+    /**
+     * NOVO MÉTODO: Despacha novamente o job para reenviar uma mensagem de campanha.
+     */
+    public function resend(CampaignContact $campaignContact): JsonResponse
+    {
+        try {
+            // Apenas despacha o mesmo job usado para o envio inicial.
+            // Isso garante que toda a lógica de envio seja reutilizada.
+            SendCampaignMessage::dispatch($campaignContact->campaign, $campaignContact);
+
+            // Atualiza o status para 'pending' para refletir a nova tentativa
+            $campaignContact->update(['status' => 'pending', 'error_message' => null]);
+
+            return response()->json(['success' => true, 'message' => 'Solicitação de reenvio adicionada à fila.']);
+        } catch (\Exception $e) {
+            \Log::error('Falha ao solicitar o reenvio da mensagem da campanha.', [
+                'campaign_contact_id' => $campaignContact->id, 
+                'error' => $e->getMessage()
+            ]);
+            return response()->json(['success' => false, 'message' => 'Falha ao solicitar o reenvio.'], 500);
+        }
     }
 }
 

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use Auth;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use App\Models\WhatsAppConversation;
@@ -19,6 +20,7 @@ class DashboardController extends Controller
      */
     public function index()
     {
+        // dd(session('tenant_id')); // Debugging line to check the authenticated user
         return Inertia::render('Dashboard', [
             'stats' => $this->getDashboardStats(),
             'chartData' => [

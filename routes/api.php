@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\CampaignController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ConversationController;
 use App\Http\Controllers\Api\MediaController;
+use App\Http\Controllers\Api\VotaBoxController;
 
 /*
 |--------------------------------------------------------------------------
@@ -126,6 +127,13 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::post('/media/upload', [MediaController::class, 'upload'])->name('media.upload');
+
+    Route::prefix('votabox')->group(function () {
+        Route::get('/tags', [VotaBoxController::class, 'getTags'])->name('api.votabox.tags');
+        Route::get('/surveys', [VotaBoxController::class, 'getSurveys'])->name('api.votabox.surveys');
+    });
+
+    Route::post('/campaigns/contacts/{campaignContact}/resend', [CampaignController::class, 'resend'])->name('api.campaigns.contacts.resend');
 });
 
 // Fallback para rotas não encontradas na API
