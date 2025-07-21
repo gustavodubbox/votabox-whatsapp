@@ -10,6 +10,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ConversationController;
 use App\Http\Controllers\Api\MediaController;
 use App\Http\Controllers\Api\VotaBoxController;
+use App\Http\Controllers\Api\TemplateEditorController;
 
 /*
 |--------------------------------------------------------------------------
@@ -131,6 +132,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('votabox')->group(function () {
         Route::get('/tags', [VotaBoxController::class, 'getTags'])->name('api.votabox.tags');
         Route::get('/surveys', [VotaBoxController::class, 'getSurveys'])->name('api.votabox.surveys');
+    });
+
+    Route::prefix('templates')->group(function () {
+        Route::get('/', [TemplateEditorController::class, 'index'])->name('api.templates.index');
+        Route::post('/', [TemplateEditorController::class, 'store'])->name('api.templates.store');
+        Route::delete('/{templateName}', [TemplateEditorController::class, 'destroy'])->name('api.templates.destroy');
     });
 
     Route::post('/campaigns/contacts/{campaignContact}/resend', [CampaignController::class, 'resend'])->name('api.campaigns.contacts.resend');
